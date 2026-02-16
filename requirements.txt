@@ -1,5 +1,6 @@
+setuptools
 streamlit
 yfinance
 pandas
-pandas_datareader
 numpy
+pandas_datareader
