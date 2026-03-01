@@ -15,6 +15,22 @@ TICKER_DESC = {
     "VGSH": "단기 국채", "VTV": "대형 가치주", "IAUM": "금 (초저비용)",
     "QQQM": "나스닥 100 (초저비용)", "SGOV": "초단기 국채(현금)"
 }
+
+# 한국 상장 ETF 대체 종목 (추천)
+KR_ETF_DESC = {
+    "IVV": "TIGER 미국S&P500 / ACE 미국S&P500",
+    "VEA": "KODEX 선진국MSCI World (*미국포함)",
+    "VWO": "ARIRANG 신흥국MSCI(합성 H)",
+    "BND": "TIGER 미국종합채권액티브(H)",
+    "USIG": "ACE 미국회사채액티브",
+    "VGIT": "TIGER 미국채10년선물 / ACE 미국30년국채액티브(H)",
+    "VGSH": "KODEX 미국달러단기채권액티브",
+    "VTV": "TIGER 미국배당다우존스 (*가치/배당 대체)",
+    "IAUM": "ACE KRX금현물 / TIGER 골드선물(H)",
+    "QQQM": "TIGER 미국나스닥100 / ACE 미국나스닥100",
+    "SGOV": "TIGER 미국달러SOFR금리액티브(합성)"
+}
+
 HISTORY_FILE = "rebalancing_history.csv"
 
 # ---------------------------
@@ -128,7 +144,74 @@ def ret12(prices, ticker):
 # 앱 UI 및 로직
 # ---------------------------
 st.set_page_config(page_title="퀀트 투자 전술 대시보드", layout="wide")
+
+# 모바일 폰트(Pretendard) 및 모든 표를 100% 동일하게 만들기 위한 공통 CSS
+st.markdown("""
+<style>
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+
+/* 기본 텍스트 요소에만 폰트를 적용하여 사이드바 아이콘 등이 깨지는 현상(글씨로 나타남) 방지 */
+html, body, p, h1, h2, h3, h4, h5, h6, li, table, th, td, div[class*="stMarkdown"], div[class*="stText"] {
+    font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif !important;
+    color: #333333;
+}
+
+/* 🚀 사이드바 화살표 등 Streamlit 기본 아이콘 폰트 강제 복구 */
+.material-symbols-rounded, .material-icons, span[class*="stIcon"], i {
+    font-family: 'Material Symbols Rounded', 'Material Icons', sans-serif !important;
+}
+
+/* 제목 크기가 너무 크지 않도록 최적화 */
+h1 { font-size: 1.5rem !important; padding-bottom: 0.5rem !important; }
+h2 { font-size: 1.3rem !important; padding-bottom: 0.4rem !important; }
+h3 { font-size: 1.15rem !important; padding-bottom: 0.3rem !important; }
+h4 { font-size: 1.05rem !important; padding-bottom: 0.2rem !important; }
+
+/* 파란색 링크 텍스트 녹색으로 변경 */
+a { color: #21c354 !important; }
+
+/* 모든 표에 적용할 공통 디자인(모양 100% 통일) */
+.unified-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+    font-size: 14px !important;
+    border: 2px solid rgba(128, 128, 128, 0.6) !important;
+}
+.unified-table th, .unified-table td {
+    border: 1px solid rgba(128, 128, 128, 0.3) !important;
+    padding: 10px !important;
+    text-align: center !important;
+    vertical-align: middle !important;
+}
+.unified-table thead th, .unified-table th {
+    background-color: rgba(128, 128, 128, 0.15) !important;
+    color: #000000 !important;
+    font-weight: bold !important;
+}
+
+/* 데이터 무결성 텍스트 폰트 통일용 클래스 */
+.unified-text {
+    font-size: 14px !important;
+}
+
+/* 스마트폰 등 좁은 화면 최적화 (글씨 크기 및 패딩 축소) */
+@media (max-width: 768px) {
+    .unified-table {
+        font-size: 12px !important;
+    }
+    .unified-table th, .unified-table td {
+        padding: 6px 3px !important;
+    }
+    .unified-text {
+        font-size: 12px !important;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.title("🏛️ 자산배분 전략 및 전술적 스위칭 시스템")
+st.markdown("<br>", unsafe_allow_html=True) # 타이틀 하단에 한 줄 띄우기
 
 # 세션 히스토리 로드
 if 'history' not in st.session_state:
@@ -145,14 +228,39 @@ total_assets = st.sidebar.number_input("총 투자 자산 (원)", min_value=0, v
 exchange_rate = st.sidebar.number_input("현재 환율 (원/$)", value=current_ex, step=0.1)
 budget_per_strat = total_assets / 3
 
+# ---------------------------
 # 데이터 유효성 알림
+# ---------------------------
+is_all_success = True
+loaded_tickers = []
+
 if prices is None or prices.empty:
-    st.warning("가격 데이터를 불러오지 못했습니다. 네트워크 문제 또는 yfinance 응답 실패일 수 있습니다.")
+    st.warning("🚨 가격 데이터를 불러오지 못했습니다. 네트워크 문제 또는 yfinance 응답 실패일 수 있습니다.")
+    is_all_success = False
 else:
-    st.success("가격 데이터를 불러왔습니다.")
+    loaded_tickers = prices.columns.tolist() if isinstance(prices, pd.DataFrame) else [prices.name]
+    missing_tickers = [t for t in TICKER_DESC.keys() if t not in loaded_tickers]
+    
+    if missing_tickers:
+        st.warning(f"⚠️ 일부 가격 데이터를 불러오지 못했습니다. 누락된 종목: {', '.join(missing_tickers)}")
+        is_all_success = False
 
 if unrate_history.empty:
-    st.warning("실업률 데이터를 불러오지 못했습니다. FRED 접근 실패일 수 있습니다.")
+    st.warning("🚨 실업률 데이터를 불러오지 못했습니다. FRED 접근 실패일 수 있습니다.")
+    is_all_success = False
+
+if is_all_success:
+    # 섹터 간 간격을 원래대로 줄여서 <br> 사용
+    st.markdown(
+        f"<div class='unified-text' style='color: #21c354; font-weight: 500; margin-bottom: 10px;'>"
+        f"✅ <strong>필수 데이터가 모두 정상적으로 로드되었습니다.</strong><br>"
+        f"- 📈 <strong>수집된 티커 목록 ({len(loaded_tickers)}개)</strong>: {', '.join(loaded_tickers)}<br>"
+        f"- 📊 <strong>실업률 데이터</strong>: 정상 로드됨 (현재 {curr_unrate:.2f}%, 12MA {ma12_unrate:.2f}%)"
+        f"</div>",
+        unsafe_allow_html=True
+    )
+
+st_divider()
 
 # IVV(=S&P) 기준 지표 (안전 체크)
 ivv = safe_series(prices, 'IVV')
@@ -165,42 +273,94 @@ else:
     mdd = (curr_p / ath - 1) * 100
     ma50 = ivv.rolling(window=50).mean().iloc[-1]
 
-st.markdown("### 🚨 전술적 알림 센터 (Tactical Alert Center)")
-with st.container():
-    col_sw, col_rv = st.columns(2)
-    with col_sw:
-        st.markdown("**📉 우량주 스위칭 단계 (공격 신호)**")
-        if np.isnan(mdd):
-            st.info("MDD를 계산할 수 없습니다 (데이터 부족).")
-        else:
-            if mdd > -15:
-                st.info(f"**상태: 노이즈 구간 (MDD {mdd:.2f}%)**\n하락폭이 작습니다. 3분할 전략 유지 권장.")
-            else:
-                if -20 < mdd <= -15:
-                    ratio, level = "20%", "1단계"
-                elif -25 < mdd <= -20:
-                    ratio, level = "40%", "2단계"
-                elif -30 < mdd <= -25:
-                    ratio, level = "60%", "3단계"
-                elif -35 < mdd <= -30:
-                    ratio, level = "80%", "4단계"
-                else:
-                    ratio, level = "100%", "최종단계"
-                st.warning(f"**상태: {level} 스위칭 (MDD {mdd:.2f}%)**\n방어 자산의 **{ratio}**를 개별 우량주로 전환 권장.")
+# ---------------------------
+# 전술적 알림 센터 (공통 CSS .unified-table 적용)
+# ---------------------------
+st.markdown("### 🚨 전술적 알림 센터")
 
-    with col_rv:
-        st.markdown("**🔄 포트폴리오 복귀 신호 (탈출 신호)**")
-        if np.isnan(curr_p) or np.isnan(ma50):
-            st.info("50일선 또는 현재가를 계산할 수 없습니다.")
-        else:
-            if curr_p < ma50:
-                st.error(f"**상태: 추세 붕괴 (50일선 하회)**\n주가가 50일선(${ma50:.2f}) 아래입니다. 3분할 전략으로 복귀 권장.")
-            elif curr_p >= ath * 0.97:
-                st.success("**상태: 수익 극대화 구간**\n전고점 근처입니다. 트레일링 스탑 고려.")
-            else:
-                st.write(f"현재 주가(${curr_p:.2f})가 50일선(${ma50:.2f}) 위에 있어 추세가 살아있습니다.")
+# 지침 메시지 로직 (단순 명료하게 "우량주 스위칭 적용" 또는 "포트폴리오 적용"으로 변경)
+if np.isnan(mdd) or np.isnan(curr_p) or np.isnan(ma50):
+    guide_msg = "데이터 부족"
+else:
+    if mdd <= -15:
+        guide_msg = "<span style='color: #FF4B4B; font-weight: bold;'>우량주 스위칭 적용</span>"
+    else:
+        guide_msg = "<span style='color: #FF4B4B; font-weight: bold;'>포트폴리오 적용</span>"
 
-st_divider()
+# 스위칭 단계 판단 로직
+if np.isnan(mdd):
+    sw_status, sw_details, sw_desc = "데이터 부족", "-", "MDD를 계산할 수 없습니다."
+else:
+    sw_details = f"현재 MDD: {mdd:.2f}%"
+    if mdd > -15:
+        sw_status = "노이즈 구간"
+        sw_desc = "하락폭이 작습니다. 3분할 전략 유지를 권장합니다."
+    else:
+        if -20 < mdd <= -15: ratio, level = "20%", "1단계"
+        elif -25 < mdd <= -20: ratio, level = "40%", "2단계"
+        elif -30 < mdd <= -25: ratio, level = "60%", "3단계"
+        elif -35 < mdd <= -30: ratio, level = "80%", "4단계"
+        else: ratio, level = "100%", "최종단계"
+        sw_status = f"{level} 스위칭"
+        sw_desc = f"방어 자산의 {ratio}를 개별 우량주로 전환할 것을 권장합니다."
+
+# 복귀 신호 판단 로직
+if np.isnan(curr_p) or np.isnan(ma50):
+    rv_status, rv_details, rv_desc = "데이터 부족", "-", "50일선 또는 현재가를 계산할 수 없습니다."
+else:
+    if curr_p < ma50:
+        rv_status = "추세 붕괴 (50일선 하회)"
+        rv_details = f"현재가: ${curr_p:.2f} / 50일선: ${ma50:.2f}"
+        rv_desc = "3분할 자산배분 전략으로 복귀를 권장합니다."
+    elif curr_p >= ath * 0.97:
+        rv_status = "수익 극대화 구간"
+        rv_details = f"현재가: ${curr_p:.2f} / 전고점: ${ath:.2f}"
+        rv_desc = "전고점 근처입니다. 트레일링 스탑을 고려해 보세요."
+    else:
+        rv_status = "정상 추세 유지"
+        rv_details = f"현재가: ${curr_p:.2f} / 50일선: ${ma50:.2f}"
+        rv_desc = "주가가 50일선 위에 있어 추세가 살아있습니다."
+
+tactical_html = f"""
+<table class="unified-table">
+    <thead>
+        <tr>
+            <th colspan="2">📌 핵심 행동 지침</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td colspan="2">{guide_msg}</td>
+        </tr>
+        <tr>
+            <th style="width: 50%;">📉 우량주 스위칭 단계</th>
+            <th style="width: 50%;">🔄 포트폴리오 복귀 신호</th>
+        </tr>
+        <tr>
+            <td style="vertical-align: top;">
+                <strong>상태:</strong> {sw_status}<br>
+                <strong>지표:</strong> {sw_details}<br>
+                💡 {sw_desc}
+            </td>
+            <td style="vertical-align: top;">
+                <strong>상태:</strong> {rv_status}<br>
+                <strong>지표:</strong> {rv_details}<br>
+                💡 {rv_desc}
+            </td>
+        </tr>
+    </tbody>
+</table>
+"""
+st.markdown(tactical_html, unsafe_allow_html=True)
+
+# 화살표 아이콘 (SVG)
+st.markdown("""
+<div style="display: flex; justify-content: center; margin: 25px 0;">
+    <svg xmlns="http://www.w3.org/2000/svg" height="40" viewBox="0 -960 960 960" width="40" fill="#21c354">
+        <path d="M480-200 240-440l56-56 184 183 184-183 56 56-240 240Zm0-240L240-680l56-56 184 183 184-183 56 56-240 240Z"/>
+    </svg>
+</div>
+""", unsafe_allow_html=True)
 
 # ---------------------------
 # 전략 계산
@@ -228,12 +388,11 @@ if vaa_pick:
 else:
     vaa_s, vaa_c = 0, 0.0
 
-# LAA: 먼저 LAA 상세(표와 합계)를 계산하여 summary에 반영
+# LAA
 spy_200ma = ivv.rolling(window=200).mean().iloc[-1] if not ivv.empty and enough_length(ivv, 200) else np.nan
 laa_dynamic = 'VGSH' if (curr_unrate > ma12_unrate and (not np.isnan(curr_p) and curr_p < spy_200ma)) else 'QQQM'
 laa_tickers = ['VTV', 'VGIT', 'IAUM', laa_dynamic]
 
-# LAA 상세 계산 (합계 포함)
 laa_res = []
 laa_sum = 0.0
 for t in laa_tickers:
@@ -241,7 +400,6 @@ for t in laa_tickers:
     sh, cs = calc_shares(budget_per_strat * 0.25, price_t, exchange_rate)
     laa_res.append({"종목": t, "수량": f"{sh}주", "금액": cs, "금액표시": f"{cs:,.0f}원"})
     laa_sum += cs
-# laa_sum now represents the actual KRW used by LAA allocations
 
 # DM
 ivv_ret = ret12(prices, 'IVV')
@@ -258,23 +416,80 @@ price_dm = safe_series(prices, dm_pick).iloc[-1] if not safe_series(prices, dm_p
 dm_s, dm_c = calc_shares(budget_per_strat, price_dm, exchange_rate)
 
 # ---------------------------
-# 요약 출력 (LAA 투자금액은 laa_sum으로 반영)
+# 요약 출력 (공통 CSS .unified-table 적용)
 # ---------------------------
 st.subheader("📊 전략별 리밸런싱 결과 요약")
-summary_df = pd.DataFrame([
-    {"전략": "VAA (🛡️)", "상태": "방어" if vaa_is_crisis else "공격", "추천": vaa_pick or "N/A", "수량": f"{vaa_s}주", "투자금액": vaa_c},
-    {"전략": "LAA (🐢)", "상태": "불황" if laa_dynamic == 'VGSH' else "정상", "추천": f"고정3+{laa_dynamic}", "수량": "하단참조", "투자금액": laa_sum},
-    {"전략": "듀얼모멘텀 (🚀)", "상태": "채권" if dm_pick == 'BND' else "주식", "추천": dm_pick or "N/A", "수량": f"{dm_s}주", "투자금액": dm_c}
-])
 
-# 투자금액 포맷팅 및 합계 행 추가
-summary_df_display = summary_df.copy()
-summary_df_display["투자금액"] = summary_df_display["투자금액"].apply(lambda x: f"{x:,.0f}원")
-total_invest = summary_df["투자금액"].sum()
-# 합계 행
-summary_df_display = pd.concat([summary_df_display, pd.DataFrame([{"전략": "📌 합계", "상태": "", "추천": "", "수량": "", "투자금액": f"{total_invest:,.0f}원"}])], ignore_index=True)
+vaa_status = "방어" if vaa_is_crisis else "공격"
+laa_status = "불황" if laa_dynamic == 'VGSH' else "정상"
+dm_status = "채권" if dm_pick == 'BND' else "주식"
+total_invest = vaa_c + laa_sum + dm_c
 
-st.table(summary_df_display)
+html_table = f"""
+<table class="unified-table">
+    <thead>
+        <tr style="border-bottom: 2px solid rgba(128, 128, 128, 0.8);">
+            <th>전략</th>
+            <th>상태</th>
+            <th>추천/종목</th>
+            <th>수량</th>
+            <th>투자금액</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr style="border-bottom: 2px solid rgba(128, 128, 128, 0.8);">
+            <td>VAA (🛡️)</td>
+            <td>{vaa_status}</td>
+            <td>{vaa_pick or "N/A"}</td>
+            <td>{vaa_s}주</td>
+            <td>{vaa_c:,.0f}원</td>
+        </tr>
+        <tr>
+            <td rowspan="5">LAA (🐢)</td>
+            <td rowspan="5">{laa_status}</td>
+            <td>{laa_res[0]["종목"]}</td>
+            <td>{laa_res[0]["수량"]}</td>
+            <td>{laa_res[0]["금액표시"]}</td>
+        </tr>
+        <tr>
+            <td>{laa_res[1]["종목"]}</td>
+            <td>{laa_res[1]["수량"]}</td>
+            <td>{laa_res[1]["금액표시"]}</td>
+        </tr>
+        <tr>
+            <td>{laa_res[2]["종목"]}</td>
+            <td>{laa_res[2]["수량"]}</td>
+            <td>{laa_res[2]["금액표시"]}</td>
+        </tr>
+        <tr>
+            <td>{laa_res[3]["종목"]}</td>
+            <td>{laa_res[3]["수량"]}</td>
+            <td>{laa_res[3]["금액표시"]}</td>
+        </tr>
+        <tr style="border-bottom: 2px solid rgba(128, 128, 128, 0.8);">
+            <td colspan="2"><strong>LAA 소계</strong></td>
+            <td><strong>{laa_sum:,.0f}원</strong></td>
+        </tr>
+        <tr style="border-bottom: 2px solid rgba(128, 128, 128, 0.8);">
+            <td>듀얼모멘텀 (🚀)</td>
+            <td>{dm_status}</td>
+            <td>{dm_pick or "N/A"}</td>
+            <td>{dm_s}주</td>
+            <td>{dm_c:,.0f}원</td>
+        </tr>
+        <tr>
+            <td colspan="4"><strong>📌 전체 총 투자금액 합계</strong></td>
+            <td><strong>{total_invest:,.0f}원</strong></td>
+        </tr>
+    </tbody>
+</table>
+"""
+st.markdown(html_table, unsafe_allow_html=True)
+
+if not np.isnan(curr_unrate):
+    st.success(f"📊 **실업률 모니터링**: 현재 **{curr_unrate:.2f}%** (12개월 평균: **{ma12_unrate:.2f}%**)")
+else:
+    st.success("실업률 데이터 없음")
 
 if st.button("📥 현재 결과 히스토리에 기록"):
     log = {"날짜": datetime.now().strftime("%Y-%m-%d %H:%M"), "VAA": vaa_pick or "", "LAA": laa_dynamic, "DM": dm_pick or "", "MDD": f"{mdd:.2f}%" if not np.isnan(mdd) else ""}
@@ -288,66 +503,35 @@ if st.button("📥 현재 결과 히스토리에 기록"):
 st_divider()
 
 # ---------------------------
-# 전략별 상세 브리핑을 표로 (요청 반영: '시장 상황' 컬럼으로 변경)
+# 전략별 상세 브리핑을 표로 (Pandas HTML 렌더링)
 # ---------------------------
 st.subheader("📝 전략별 상세 브리핑 (요약 표)")
 brief_rows = []
 
-# VAA row
-vaa_judge = "공격군 중 일부 모멘텀이 음수이면 방어 전환" if vaa_is_crisis else "공격 모멘텀 우세"
-vaa_impact = "방어 모드: 주식 노출 축소 → 채권/현금 확대; 공격 모드: 모멘텀 우수 자산 집중"
-vaa_market = "시장 상황: 변동성 확대 시 방어 자산 선호; 모멘텀 회복 시 공격 자산 재가동"
 brief_rows.append({
     "전략": "VAA (🛡️)",
-    "판단 근거": vaa_judge,
-    "영향": vaa_impact,
-    "시장 상황": vaa_market
+    "판단 근거": "공격군 중 일부 모멘텀이 음수이면 방어 전환" if vaa_is_crisis else "공격 모멘텀 우세",
+    "영향": "방어 모드: 주식 노출 축소 → 채권/현금 확대; 공격 모드: 모멘텀 우수 자산 집중",
+    "시장 상황": "변동성 확대 시 방어 자산 선호; 모멘텀 회복 시 공격 자산 재가동"
 })
-
-# LAA row
-laa_judge = "실업률 상승(현재 > 12M 평균) AND S&P(IVV) 200일선 하회 → 방어"
-laa_impact = "동시 악화 시 변동성 완화 목적의 초단기 국채 전환; 정상 시 분산 유지"
-laa_market = "시장 상황: 경기 약화 신호(실업률 상승)와 가격 약세 동시 발생 시 방어적 포지셔닝 권장"
 brief_rows.append({
     "전략": "LAA (🐢)",
-    "판단 근거": laa_judge,
-    "영향": laa_impact,
-    "시장 상황": laa_market
+    "판단 근거": "실업률 상승(현재 > 12M 평균) AND S&P(IVV) 200일선 하회 → 방어",
+    "영향": "동시 악화 시 변동성 완화 목적의 초단기 국채 전환; 정상 시 분산 유지",
+    "시장 상황": "경기 약화 신호(실업률 상승)와 가격 약세 동시 발생 시 방어적 포지셔닝 권장"
 })
-
-# DM row
-dm_judge = "12개월 상대수익률(IVV vs VEA) 비교 후 현금(SGOV) 대비 우위 판단"
-dm_impact = "주식 우위 시 주식 노출 유지; 우위 없으면 채권(BND)으로 방어"
-dm_market = "시장 상황: 글로벌 주식 상대수익률이 현저히 낮아지면 안전자산 선호; 주식 우위 시 리스크 온"
 brief_rows.append({
     "전략": "듀얼모멘텀 (🚀)",
-    "판단 근거": dm_judge,
-    "영향": dm_impact,
-    "시장 상황": dm_market
+    "판단 근거": "12개월 상대수익률(IVV vs VEA) 비교 후 현금(SGOV) 대비 우위 판단",
+    "영향": "주식 우위 시 주식 노출 유지; 우위 없으면 채권(BND)으로 방어",
+    "시장 상황": "글로벌 주식 상대수익률이 현저히 낮아지면 안전자산 선호; 주식 우위 시 리스크 온"
 })
 
-brief_df = pd.DataFrame(brief_rows)
-# 한 줄 셀 규칙: 각 셀 한 줄로 유지하기 위해 줄바꿈 제거
-brief_df = brief_df.replace({r"\n": " "}, regex=True)
-st.table(brief_df)
+brief_df = pd.DataFrame(brief_rows).replace({r"\n": " "}, regex=True)
+brief_df.index = np.arange(1, len(brief_df) + 1)
+brief_df.index.name = "No."
 
-st_divider()
-
-# ---------------------------
-# LAA 상세 (오직 왼쪽에만 표시; 옆의 상세 브리핑은 삭제됨)
-# ---------------------------
-st.subheader("LAA 상세 및 실업률")
-st.write(f"**LAA 전략 상세 (총액: {laa_sum:,.0f}원 — 실제 할당 합계)**")
-laa_display = []
-for r in laa_res:
-    laa_display.append({"종목": r["종목"], "수량": r["수량"], "금액(원)": r["금액표시"]})
-laa_display.append({"종목": "📂 합계", "수량": "-", "금액(원)": f"{laa_sum:,.0f}원"})
-st.table(pd.DataFrame(laa_display))
-
-if not np.isnan(curr_unrate):
-    st.info(f"📊 **실업률**: 현재 **{curr_unrate:.2f}%** (12개월 평균: **{ma12_unrate:.2f}%**)")
-else:
-    st.info("실업률 데이터 없음")
+st.markdown(brief_df.reset_index().to_html(classes="unified-table", index=False, escape=False), unsafe_allow_html=True)
 
 st_divider()
 
@@ -357,30 +541,47 @@ st_divider()
 t1, t2, t3 = st.tabs(["📜 리밸런싱 히스토리", "📉 주요 지표 차트", "ℹ️ 종목 정보"])
 with t1:
     if st.session_state['history']:
-        st.table(pd.DataFrame(st.session_state['history']))
+        hist_df = pd.DataFrame(st.session_state['history'])
+        hist_df.index = np.arange(1, len(hist_df) + 1)
+        hist_df.index.name = "No."
+        st.markdown(hist_df.reset_index().to_html(classes="unified-table", index=False, escape=False), unsafe_allow_html=True)
     else:
-        st.info("저장된 히스토리가 없습니다.")
+        st.success("저장된 히스토리가 없습니다.")
 
 with t2:
-    # 실업률 및 12개월 평균 그래프 (월별) — IVV 차트 제거 요청 반영
     st.subheader("실업률 (월별) 및 12개월 평균")
     if not unrate_history.empty:
         plot_df = unrate_history.copy()
         plot_df.index.name = "Month"
         display_unrate = plot_df.rename(columns={'UNRATE': '실업률(%)', 'MA12': '12개월 평균(%)'})
-        st.table(display_unrate)
+        
+        formatted_unrate = display_unrate.copy()
+        for col in formatted_unrate.columns:
+            formatted_unrate[col] = formatted_unrate[col].apply(lambda x: f"{x:.2f}")
+            
+        st.markdown(formatted_unrate.reset_index().to_html(classes="unified-table", index=False, escape=False), unsafe_allow_html=True)
         st.line_chart(plot_df)
         st.caption("월별 실업률과 12개월 이동평균을 함께 표시합니다.")
     else:
-        st.info("실업률 데이터가 없어 차트를 표시할 수 없습니다.")
+        st.success("실업률 데이터가 없어 차트를 표시할 수 없습니다.")
 
 with t3:
     rows = []
     for k, v in TICKER_DESC.items():
         s = safe_series(prices, k)
         price_str = f"${s.iloc[-1]:.2f}" if not s.empty else "N/A"
-        rows.append({"티커": k, "현재가": price_str, "설명": v})
-    st.table(pd.DataFrame(rows))
+        kr_equivalent = KR_ETF_DESC.get(k, "대체 종목 없음")
+        rows.append({
+            "미국 티커": k, 
+            "현재가 (미국)": price_str, 
+            "설명": v, 
+            "🇰🇷 대체가능 한국 상장 ETF": kr_equivalent
+        })
+        
+    info_df = pd.DataFrame(rows)
+    info_df.index = np.arange(1, len(info_df) + 1)
+    info_df.index.name = "No."
+    st.markdown(info_df.reset_index().to_html(classes="unified-table", index=False, escape=False), unsafe_allow_html=True)
 
 st_divider()
 st.markdown("**주의사항**: 이 도구는 교육용이며 투자 권유가 아닙니다. 데이터 부족, 네트워크 오류, yfinance/FRED 응답 실패 등으로 결과가 달라질 수 있습니다.")
